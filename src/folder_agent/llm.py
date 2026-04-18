@@ -13,11 +13,12 @@
 
 import json
 import os
+import socket
 from pathlib import Path
 from urllib import error, request
 
 from folder_agent.models import FolderNode
-from folder_agent.scanner import format_bytes, render_tree_full
+from folder_agent.scanner import format_bytes, render_tree, render_tree_full
 
 
 class SiliconFlowAnalyzer:
@@ -89,17 +90,26 @@ class SiliconFlowAnalyzer:
         - `str`：模型返回的中文 Markdown 分析文本（包含用途推断与清理建议）。
 
         异常：
-        - `RuntimeError`：HTTP 错误、网络不可达、或返回体缺少有效 `content`。
-        - `json.JSONDecodeError`：响应体不是合法 JSON。
+        - 除缺少 API key（构造函数已校验）外，本函数尽量不抛运行时异常；
+          若遇到 token 超限/超时/网络波动，会自动缩短结构树并重试，尽量保证仍能产出分析文本。
         """
 
         rank_lines = [
             f"{idx}. {item.path.name or str(item.path)} - {format_bytes(item.size_bytes)}"
             for idx, item in enumerate(ranking_snapshot, start=1)
         ]
-        # 结构树可能非常长，因此严格遵守 tree_max_chars：超过就直接截断。
-        tree_text, tree_truncated, tree_node_count = render_tree_full(folder, max_chars=tree_max_chars)
-        prompt = f"""
+
+        # 兼容 base_url 既可能是 `https://host/v1`，也可能是 `https://host`。
+        base = self.base_url.rstrip("/")
+        if not base.endswith("/v1"):
+            base = f"{base}/v1"
+        endpoint = f"{base}/chat/completions"
+
+        system_msg = {"role": "system", "content": "你输出严谨、可执行、面向清理决策的中文分析报告。"}
+
+        def _build_prompt_full(tree_chars: int) -> str:
+            tree_text, tree_truncated, tree_node_count = render_tree_full(folder, max_chars=tree_chars)
+            return f"""
 你是一个资深 Windows 磁盘清理与目录结构分析专家。请根据下面的目录信息，判断该文件夹可能是什么、作用是什么，以及是否适合清理。
 
 要求：
@@ -123,52 +133,141 @@ class SiliconFlowAnalyzer:
 当前层级的 Top 排名：
 {chr(10).join(rank_lines) if rank_lines else "(无)"}
 
-当前文件夹的（尽量）完整子文件夹结构树：
+当前文件夹的子文件夹结构树：
 - 结构树节点数（写入提示词）: {tree_node_count}
 - 是否截断: {"是" if tree_truncated else "否"}
 {tree_text}
 """.strip()
 
-        payload = {
-            "model": self.model,
-            "temperature": 0.2,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": "你输出严谨、可执行、面向清理决策的中文分析报告。",
+        def _build_prompt_summary() -> str:
+            # 更短的兜底提示词：显著减少 token 压力与响应耗时。
+            tree_text = render_tree(folder, max_depth=3, max_children=50)
+            return f"""
+你是一个资深 Windows 磁盘清理与目录结构分析专家。请根据下面的目录信息，判断该文件夹可能是什么、作用是什么，以及是否适合清理。
+
+要求：
+1. 结合文件夹名称、子文件夹名称、层级结构和大小进行推测。
+2. 说明判断依据，避免空泛结论。
+3. 对清理建议给出风险等级：低 / 中 / 高。
+4. 如果判断不确定，要明确写出“不确定”以及原因。
+5. 输出使用中文 Markdown，包含以下小节：
+   - 可能用途
+   - 判断依据
+   - 清理建议
+   - 风险等级
+   - 建议操作步骤
+
+当前分析对象：
+- 路径: {folder.path}
+- 深度: {depth}
+- 文件夹大小: {format_bytes(folder.size_bytes)}
+- 直接子文件夹数量: {len(folder.children)}
+
+当前层级的 Top 排名：
+{chr(10).join(rank_lines) if rank_lines else "(无)"}
+
+当前文件夹的树形结构摘要（已裁剪）：
+{tree_text}
+""".strip()
+
+        def _is_token_limit(detail: str | None) -> bool:
+            if not detail:
+                return False
+            try:
+                obj = json.loads(detail)
+            except Exception:
+                return False
+            return isinstance(obj, dict) and obj.get("code") == 20015
+
+        def _call(prompt_text: str, timeout_s: int) -> tuple[dict | None, str | None, Exception | None]:
+            body = {
+                "model": self.model,
+                "temperature": 0.2,
+                "messages": [system_msg, {"role": "user", "content": prompt_text}],
+            }
+            req = request.Request(
+                url=endpoint,
+                data=json.dumps(body).encode("utf-8"),
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
                 },
-                {"role": "user", "content": prompt},
-            ],
-        }
+                method="POST",
+            )
+            try:
+                with request.urlopen(req, timeout=timeout_s) as resp:
+                    return json.loads(resp.read().decode("utf-8")), None, None
+            except error.HTTPError as exc:
+                return None, exc.read().decode("utf-8", errors="ignore"), exc
+            except error.URLError as exc:
+                return None, None, exc
+            except (TimeoutError, socket.timeout) as exc:
+                return None, None, exc
 
-        # 兼容 base_url 既可能是 `https://host/v1`，也可能是 `https://host`。
-        base = self.base_url.rstrip("/")
-        if not base.endswith("/v1"):
-            base = f"{base}/v1"
-        endpoint = f"{base}/chat/completions"
+        def _extract_content(resp: dict | None) -> str:
+            if not resp:
+                return ""
+            choices = resp.get("choices") or []
+            if not choices:
+                return ""
+            return (choices[0].get("message") or {}).get("content", "") or ""
 
-        req = request.Request(
-            url=endpoint,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json",
-            },
-            method="POST",
+        # 默认超时适当放宽，减少长目录分析超时概率。
+        timeout_s = 240
+        min_tree_chars = 2_000
+
+        # 第一阶段：使用“完整树（按 tree_max_chars 截断）”请求。
+        # 如果服务端返回 token 超限，则继续缩短结构树并重试，确保最终仍能分析。
+        last_detail: str | None = None
+        tree_chars = max(tree_max_chars, min_tree_chars)
+        for _ in range(6):
+            prompt_text = _build_prompt_full(tree_chars)
+            resp, detail, exc = _call(prompt_text, timeout_s=timeout_s)
+            if detail is not None:
+                last_detail = detail
+                if _is_token_limit(detail) and tree_chars > min_tree_chars:
+                    tree_chars = max(min_tree_chars, int(tree_chars * 0.5))
+                    continue
+                # 其他 HTTP 错误进入兜底摘要树
+                break
+            if exc is not None:
+                # 超时/网络波动：先再试一次同样提示词；失败则进入兜底摘要树
+                resp2, detail2, _exc2 = _call(prompt_text, timeout_s=timeout_s)
+                if detail2 is not None:
+                    last_detail = detail2
+                    break
+                content2 = _extract_content(resp2)
+                if content2:
+                    return content2
+                break
+
+            content = _extract_content(resp)
+            if content:
+                return content
+            last_detail = "empty content"
+            break
+
+        # 第二阶段兜底：使用更短的“摘要树”提示词，降低 token 压力与响应耗时。
+        prompt_text = _build_prompt_summary()
+        for _ in range(2):
+            resp, detail, exc = _call(prompt_text, timeout_s=timeout_s)
+            if detail is not None:
+                last_detail = detail
+                continue
+            if exc is not None:
+                continue
+            content = _extract_content(resp)
+            if content:
+                return content
+
+        # 最后兜底：不抛异常，返回一段“降级说明”，避免报告里出现硬失败段落。
+        return (
+            "### 分析降级（未获取到模型回复）\n\n"
+            f"- 路径: `{folder.path}`\n"
+            "- 说明: 本次调用模型未成功（可能是提示词过长、接口短暂异常或网络波动）。\n\n"
+            "建议：\n"
+            f"- 继续降低 `--tree-max-chars`（当前={tree_max_chars}），例如 10000 或 5000。\n"
+            "- 避开高峰期或稍后重试。\n"
+            "- 如环境存在代理，确保 `HTTP_PROXY/HTTPS_PROXY` 不指向无效地址。\n"
+            + (f"\n调试信息（简要）: `{last_detail}`\n" if last_detail else "")
         )
-        try:
-            with request.urlopen(req, timeout=120) as resp:
-                response_data = json.loads(resp.read().decode("utf-8"))
-        except error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="ignore")
-            raise RuntimeError(f"SiliconFlow API HTTP error {exc.code}: {detail}") from exc
-        except error.URLError as exc:
-            raise RuntimeError(f"Failed to reach SiliconFlow API: {exc.reason}") from exc
-
-        choices = response_data.get("choices") or []
-        content = ""
-        if choices:
-            content = choices[0].get("message", {}).get("content", "")
-        if not content:
-            raise RuntimeError(f"No content returned for folder: {Path(folder.path)}")
-        return content

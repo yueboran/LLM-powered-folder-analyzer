@@ -158,26 +158,15 @@ def collect_analyses(
         if analyzer is not None:
             if log_fn is not None:
                 log_fn(f"LLM 分析开始: depth=1 size={child.size_bytes} path={child.path}")
-            try:
-                llm_summary = analyzer.analyze_folder(
-                    folder=child,
-                    depth=1,
-                    ranking_snapshot=current_top,
-                    tree_max_chars=tree_max_chars,
-                )
-                if log_fn is not None:
-                    log_fn(f"LLM 分析完成: path={child.path}")
-            except Exception as exc:
-                if log_fn is not None:
-                    log_fn(f"LLM 分析失败: path={child.path} error={exc}")
-                llm_summary = (
-                    "### 分析失败\n\n"
-                    f"- 路径: `{child.path}`\n"
-                    f"- 错误: `{exc}`\n\n"
-                    "建议：\n"
-                    "- 该目录结构可能过大导致提示词超限，可尝试降低 `--tree-max-chars`。\n"
-                    "- 也可能是接口临时错误/限流，稍后重试。\n"
-                )
+            # `analyze_folder` 内部已经实现 token 超限/超时的自动降级与兜底，不应在这里把异常原文写进报告。
+            llm_summary = analyzer.analyze_folder(
+                folder=child,
+                depth=1,
+                ranking_snapshot=current_top,
+                tree_max_chars=tree_max_chars,
+            )
+            if log_fn is not None:
+                log_fn(f"LLM 分析完成: path={child.path}")
 
         analyses.append(
             FolderAnalysis(
