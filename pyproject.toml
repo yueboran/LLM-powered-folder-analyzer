@@ -1,4 +1,4 @@
-[project]
+﻿[project]
 name = "folder-analysis-agent"
 version = "0.1.0"
 description = "Recursive folder size analyzer with SiliconFlow-powered cleanup suggestions."
@@ -8,6 +8,7 @@ dependencies = []
 
 [project.scripts]
 folder-agent = "folder_agent.cli:main"
+folder-panel = "folder_agent.webapp_v2:main"
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -18,3 +19,6 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+folder_agent = ["static/*"]

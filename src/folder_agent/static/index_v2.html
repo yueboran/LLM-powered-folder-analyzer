@@ -1,0 +1,150 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>目录分析报告阅读器</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="topbar">
+        <div class="brand-block">
+          <p class="eyebrow">Folder Analysis Reader</p>
+          <h1>目录分析报告阅读器</h1>
+          <p class="brand-copy">把扫描结果按完整文档方式阅读、筛选、对比与导出。</p>
+        </div>
+        <div class="toolbar" aria-label="扫描与导出工具栏">
+          <label class="field root-field">
+            <span>根目录</span>
+            <input id="rootPath" value="C:\Users\26897\AppData\Local" />
+          </label>
+          <label class="field narrow-field">
+            <span>TopN</span>
+            <input id="topN" type="number" min="1" max="50" value="10" />
+          </label>
+          <label class="field narrow-field">
+            <span>结构树上限</span>
+            <input id="treeMaxChars" type="number" min="1000" value="10000" />
+          </label>
+          <label class="check-field">
+            <input id="skipLLM" type="checkbox" />
+            <span>只扫描，不调用大模型</span>
+          </label>
+          <div class="toolbar-actions">
+            <button id="startScan">开始扫描</button>
+            <button id="reloadSnapshots" class="secondary">刷新快照</button>
+            <button id="exportMarkdown" class="secondary">导出原始 Markdown</button>
+            <button id="exportJson" class="secondary">导出 JSON</button>
+          </div>
+        </div>
+      </header>
+
+      <div class="workspace">
+        <aside class="sidebar">
+          <section class="sidebar-section">
+            <div class="section-head">
+              <h2>文档导航</h2>
+              <button id="toggleSidebar" class="ghost mobile-only">收起</button>
+            </div>
+            <nav id="tocNav" class="toc-nav"></nav>
+          </section>
+
+          <section class="sidebar-section">
+            <h2>筛选阅读</h2>
+            <label class="field">
+              <span>风险等级</span>
+              <select id="riskFilter">
+                <option value="">全部</option>
+                <option value="low">低风险</option>
+                <option value="medium">中风险</option>
+                <option value="high">高风险</option>
+                <option value="unknown">未知</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>建议类型</span>
+              <select id="typeFilter">
+                <option value="">全部</option>
+                <option value="cache">缓存</option>
+                <option value="logs">日志</option>
+                <option value="dev_deps">开发依赖</option>
+                <option value="ide_index">IDE / 索引</option>
+                <option value="app_data">应用数据</option>
+                <option value="installers">安装 / 更新包</option>
+                <option value="user_data">用户数据</option>
+                <option value="other">其他</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>最小体积 (MB)</span>
+              <input id="sizeFilter" type="number" min="0" value="0" />
+            </label>
+            <label class="field">
+              <span>阅读密度</span>
+              <select id="viewDensity">
+                <option value="full">完整正文</option>
+                <option value="summary">只看摘要</option>
+              </select>
+            </label>
+          </section>
+
+          <section class="sidebar-section">
+            <h2>快照历史</h2>
+            <div id="snapshotList" class="snapshot-list"></div>
+          </section>
+        </aside>
+
+        <main class="reader-shell">
+          <section class="status-strip">
+            <div class="status-meta">
+              <span id="jobStatus" class="status-pill">空闲</span>
+              <span id="jobHint" class="status-text">等待任务启动</span>
+            </div>
+            <button id="openSidebar" class="ghost mobile-only">目录</button>
+          </section>
+
+          <section class="log-section">
+            <div class="section-head">
+              <h2>执行日志</h2>
+            </div>
+            <pre id="logOutput">等待任务启动…</pre>
+          </section>
+
+          <section id="reportHeader" class="report-cover empty-state">
+            请选择一个快照，或重新发起扫描。
+          </section>
+
+          <section id="reportSummary" class="summary-panel"></section>
+          <section id="comparePanel" class="compare-panel"></section>
+
+          <section id="rankingSection" class="document-section"></section>
+          <section id="analysisContainer" class="analysis-stream"></section>
+          <section id="inaccessibleSection" class="document-section"></section>
+
+          <section class="document-section">
+            <div class="section-head">
+              <h2>快照对比</h2>
+            </div>
+            <div class="compare-controls">
+              <label class="field">
+                <span>前一次快照</span>
+                <select id="beforeSnapshot"></select>
+              </label>
+              <label class="field">
+                <span>后一次快照</span>
+                <select id="afterSnapshot"></select>
+              </label>
+              <button id="compareSnapshots" class="secondary">生成对比</button>
+            </div>
+            <div id="compareResult" class="compare-result">尚未生成对比。</div>
+          </section>
+
+        </main>
+      </div>
+    </div>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
+
