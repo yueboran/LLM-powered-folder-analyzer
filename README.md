@@ -29,19 +29,19 @@
 
 - `main`
   当前主线版本，包含 CLI + LLM 分析 + Markdown 报告 + 本地 Web UI 阅读器
-- `legacy/gui-only`
-  早期仅 GUI 原型版本
+- `legacy/cli-only`
+  早期仅 CLI 分析版本
 
 建议标签：
 
-- `v1.0-gui-only`
+- `v1.0-cli-only`
 - `v2.0-llm-webui`
 
 说明：
 
 - 当前工作区已经是 `v2` 主线代码
-- `legacy/gui-only` 分支与 `v1.0-gui-only` 标签需要基于旧 GUI 版源码创建
-- 如果旧 GUI 版代码尚未导入当前仓库，需要先补齐旧源码，再创建该历史分支和标签
+- `legacy/cli-only` 分支与 `v1.0-cli-only` 标签用于保留早期 CLI 版本
+- 该历史分支不包含当前本地 Web UI 阅读器
 
 ## 环境准备
 
