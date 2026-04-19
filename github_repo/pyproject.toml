@@ -1,0 +1,20 @@
+[project]
+name = "folder-analysis-agent"
+version = "0.1.0"
+description = "Recursive folder size analyzer with SiliconFlow-powered cleanup suggestions."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+folder-agent = "folder_agent.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
